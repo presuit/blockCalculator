@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>Direct Manipulation of Math Symbols</title>
+    <style>
+      body {
+        display: flex;
+      }
+    </style>
+  </head>
+
+  <body>
+    <script
+      src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"
+      type="text/javascript"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/2.4.6/fabric.min.js"
+      type="text/javascript"
+    ></script>
+
+    <script src="./resources/math.min.js" type="text/javascript"></script>
+
+    <canvas id="c" width="1024" height="768"> Canvas not supported </canvas>
+    <div>
+      <h1 id="foo"></h1>
+    </div>
+
+    <script>
+      const parser = math.parser();
+
+      const SYMBOL_WIDTH = 50;
+      const SYMBOL_HEIGHT = 50;
+
+      let MathApp = {};
+
+      MathApp.CURSOR_AREA_WIDTH = 0;
+      MathApp.CURSOR_AREA_HEIGHT = 0;
+
+      MathApp.symbol_paths = {
+        "+": "add",
+        "-": "sub",
+        "*": "mul",
+        "/": "div",
+        "(": "parenthesis_open",
+        ")": "parenthesis_close",
+        "[": "squarebracket_open",
+        "]": "squarebracket_close",
+        "{": "curlybrace_open",
+        "}": "curlybrace_close",
+        ".": "period",
+        ",": "comma",
+        ":": "colon",
+        ";": "semicolon",
+        "=": "equal",
+        ">": "more",
+        "<": "less",
+        "!": "exclamation",
+      };
+
+      MathApp.blocks = [];
+      MathApp.selected_block = null;
+
+      MathApp.is_mouse_dragging = false;
+      MathApp.mouse_drag_prev = { x: 0, y: 0 };
+
+      //added
+      MathApp.current_cursor_point = {};
+      MathApp.closest_block_from_dragging = null;
+      MathApp.Connect = {};
+
+      MathApp.block_types = {
+        UNDEFINED: "undefind",
+        SYMBOL: "symbol",
+        BLOCK_CHAIN: "block_chain",
+      };
+
+      MathApp.initialize = function () {
+        for (let i = 0; i <= 9; i++) {
+          let key = i.toString();
+          let value = key;
+          this.symbol_paths[key] = value;
+        }
+
+        for (let c = "a".charCodeAt(0); c <= "z".charCodeAt(0); c++) {
+          let key = String.fromCharCode(c);
+          let value = key;
+          this.symbol_paths[key] = value;
+        }
+
+        this.canvas = new fabric.Canvas("c", {
+          backgroundColor: "#eee",
+          hoverCursor: "default",
+          selection: false,
+        });
+
+        //added
+        const canvas_position = this.canvas
+          .getElement()
+          .getBoundingClientRect();
+        MathApp.CURSOR_AREA_WIDTH = canvas_position.width * 0.1;
+        MathApp.CURSOR_AREA_HEIGHT = canvas_position.height * 0.1;
+
+        //
+        $(document).keypress(function (event) {
+          let key = String.fromCharCode(event.which);
+          MathApp.handleKeyPress(key);
+        });
+        $(document).mousedown(function (event) {
+          let p = { x: event.pageX, y: event.pageY };
+          MathApp.handleMouseDown(p);
+        });
+        $(document).mouseup(function (event) {
+          let p = { x: event.pageX, y: event.pageY };
+          MathApp.handleMouseUp(p);
+        });
+        $(document).mousemove(function (event) {
+          let p = { x: event.pageX, y: event.pageY };
+          MathApp.handleMouseMove(p);
+        });
+        window.addEventListener(
+          "contextmenu",
+          (e) => {
+            e.preventDefault();
+          },
+          false
+        );
+      };
+
+      MathApp.handleKeyPress = function (key) {
+        if (key in this.symbol_paths) {
+          let size = {
+            width: SYMBOL_WIDTH,
+            height: SYMBOL_HEIGHT,
+          };
+
+          //added
+          const canvas_position = this.canvas
+            .getElement()
+            .getBoundingClientRect();
+
+          let position_x = MathApp.current_cursor_point.x;
+          let position_y = MathApp.current_cursor_point.y;
+
+          if (position_x < SYMBOL_WIDTH / 2) {
+            position_x = SYMBOL_WIDTH / 2;
+          } else if (
+            position_x + MathApp.CURSOR_AREA_WIDTH >
+            canvas_position.width
+          ) {
+            const adjustment =
+              position_x + MathApp.CURSOR_AREA_WIDTH - canvas_position.width;
+            position_x = position_x - MathApp.CURSOR_AREA_WIDTH - adjustment;
+          }
+
+          if (position_y < SYMBOL_HEIGHT / 2) {
+            position_y = SYMBOL_HEIGHT / 2;
+          } else if (
+            position_y + MathApp.CURSOR_AREA_HEIGHT >
+            canvas_position.height
+          ) {
+            const adjustment =
+              position_y + MathApp.CURSOR_AREA_HEIGHT - canvas_position.height;
+            position_y = position_y - MathApp.CURSOR_AREA_HEIGHT - adjustment;
+          }
+
+          let position = {
+            x: position_x + Math.random() * MathApp.CURSOR_AREA_WIDTH,
+            y: position_y + Math.random() * MathApp.CURSOR_AREA_WIDTH,
+          };
+
+          let new_symbol = new MathApp.Symbol(position, size, key);
+        }
+      };
+
+      MathApp.handleMouseDown = function (window_p) {
+        if (MathApp.isInCanvas(window_p)) {
+          let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+          if (MathApp.selected_block != null) {
+            MathApp.selected_block.onDeselected();
+            MathApp.selected_block = null;
+          }
+
+          let block = MathApp.findBlockOn(canvas_p);
+          if (block != null) {
+            MathApp.selected_block = block;
+            MathApp.selected_block.onSelected();
+          }
+
+          MathApp.is_mouse_dragging = true;
+          MathApp.mouse_drag_prev = canvas_p;
+
+          MathApp.canvas.requestRenderAll();
+        } else {
+          MathApp.is_mouse_dragging = false;
+          MathApp.mouse_drag_prev = { x: 0, y: 0 };
+        }
+      };
+
+      MathApp.CalcDistancePassive = function () {
+        const blocksPostion = MathApp.calcPositionsFromDragging();
+
+        if (blocksPostion !== null) {
+          MathApp.Connect = {};
+          if (this.closest_block_from_dragging !== null) {
+            const block = this.blocks.find(
+              (block) => block.id === this.closest_block_from_dragging.id
+            );
+            if (block) {
+              block.visual_items[block.visual_items.length - 1].set({
+                stroke: "blue",
+              });
+              this.closest_block_from_dragging = null;
+            }
+          }
+          this.closest_block_from_dragging = blocksPostion[0];
+          for (const block of blocksPostion) {
+            if (this.closest_block_from_dragging.distance > block.distance) {
+              this.closest_block_from_dragging = block;
+            }
+          }
+
+          const closestBlock = MathApp.blocks.find(
+            (block) => block.id === this.closest_block_from_dragging.id
+          );
+
+          const closestBlockBoundary = {
+            minX: closestBlock.position.x - closestBlock.size.width / 2,
+            maxX: closestBlock.position.x + closestBlock.size.width / 2,
+            minY: closestBlock.position.y - closestBlock.size.height / 2,
+            maxY: closestBlock.position.y + closestBlock.size.height / 2,
+          };
+
+          const selectedBlockBoundary = {
+            leftX:
+              MathApp.selected_block.position.x -
+              MathApp.selected_block.size.width / 2,
+            rightX:
+              MathApp.selected_block.position.x +
+              MathApp.selected_block.size.width / 2,
+            minY:
+              MathApp.selected_block.position.y -
+              MathApp.selected_block.size.height / 2,
+            maxY:
+              MathApp.selected_block.position.y +
+              MathApp.selected_block.size.height / 2,
+          };
+
+          if (
+            (selectedBlockBoundary.leftX >= closestBlockBoundary.minX &&
+              selectedBlockBoundary.leftX <= closestBlockBoundary.maxX &&
+              ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
+                selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
+                (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
+                  selectedBlockBoundary.maxY <= closestBlockBoundary.maxY))) ||
+            (selectedBlockBoundary.rightX >= closestBlockBoundary.minX &&
+              selectedBlockBoundary.rightX <= closestBlockBoundary.maxX &&
+              ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
+                selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
+                (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
+                  selectedBlockBoundary.maxY <= closestBlockBoundary.maxY)))
+          ) {
+            //겹침 마우스를 떼기 전에 미리 겹쳐질 부위를 다른 색상으로 변경시켜야함
+            const percentage = MathApp.calcPercentageFromDragging(closestBlock);
+            if (percentage !== null) {
+              if (percentage.left > percentage.right) {
+                closestBlock.visual_items[
+                  closestBlock.visual_items.length - 1
+                ].set({
+                  stroke: "rgba(231, 76, 60,1.0)",
+                });
+                MathApp.Connect = { ok: true, left: true, right: false };
+              } else {
+                closestBlock.visual_items[
+                  closestBlock.visual_items.length - 1
+                ].set({
+                  stroke: "rgba(52, 152, 219,1.0)",
+                });
+                MathApp.Connect = { ok: true, left: false, right: true };
+              }
+            }
+          } else {
+            MathApp.Connect = { ok: false, left: false, right: false };
+          }
+        }
+      };
+
+      //added
+      MathApp.calcPercentageFromDragging = function (targetBlock) {
+        if (targetBlock !== null && this.selected_block !== null) {
+          const canvasPosition = this.canvas
+            .getElement()
+            .getBoundingClientRect();
+
+          const leftCanvas = { start: 0, end: targetBlock.position.x - 1 };
+          const rightCanvas = {
+            start: targetBlock.position.x,
+            end: canvasPosition.width,
+          };
+
+          const selectedLeftX =
+            this.selected_block.position.x - this.selected_block.size.width / 2;
+          const selectedRightX =
+            this.selected_block.position.x + this.selected_block.size.width / 2;
+
+          if (
+            selectedLeftX >= leftCanvas.start &&
+            selectedLeftX <= leftCanvas.end &&
+            selectedRightX >= rightCanvas.start &&
+            selectedRightX <= rightCanvas.end
+          ) {
+            //겹쳐짐
+            const left =
+              ((leftCanvas.end - selectedLeftX) /
+                (leftCanvas.end - leftCanvas.start)) *
+              100;
+            const right =
+              ((selectedRightX - rightCanvas.start) /
+                (rightCanvas.end - rightCanvas.start)) *
+              100;
+
+            return { left, right };
+          } else {
+            //안겹처짐
+            if (
+              selectedLeftX >= leftCanvas.start &&
+              selectedLeftX <= leftCanvas.end &&
+              selectedRightX >= leftCanvas.start &&
+              selectedRightX <= leftCanvas.end
+            ) {
+              //왼쪽 캔버스에 존재
+              return { left: 100, right: 0 };
+            } else if (
+              selectedLeftX >= rightCanvas.start &&
+              selectedLeftX <= rightCanvas.end &&
+              selectedRightX >= rightCanvas.start &&
+              selectedRightX <= rightCanvas.end
+            ) {
+              //오른쪽 캔버스에 존재
+              return { left: 0, right: 100 };
+            }
+          }
+        }
+
+        return null;
+      };
+
+      MathApp.handleMouseMove = function (window_p) {
+        let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+        if (MathApp.is_mouse_dragging) {
+          if (MathApp.selected_block != null) {
+            let tx = canvas_p.x - MathApp.mouse_drag_prev.x;
+            let ty = canvas_p.y - MathApp.mouse_drag_prev.y;
+            MathApp.selected_block.translate({ x: tx, y: ty });
+          }
+          MathApp.mouse_drag_prev = canvas_p;
+
+          MathApp.canvas.requestRenderAll();
+        }
+        MathApp.current_cursor_point = canvas_p;
+      };
+
+      MathApp.calcPositionsFromDragging = function () {
+        if (MathApp.is_mouse_dragging) {
+          if (MathApp.selected_block != null) {
+            if (this.blocks.length !== 0) {
+              const arr = [];
+
+              const targetBlockPosition = MathApp.selected_block.position;
+
+              for (const block of MathApp.blocks) {
+                if (block.id === MathApp.selected_block.id) {
+                  continue;
+                }
+                let blockPosition = block.position;
+                const obj = {
+                  id: block.id,
+                  name: block.name || "",
+                  distance: Math.sqrt(
+                    Math.pow(blockPosition.x - targetBlockPosition.x, 2) +
+                      Math.pow(blockPosition.y - targetBlockPosition.y, 2)
+                  ),
+                };
+                arr.push(obj);
+              }
+              return arr;
+            }
+          }
+        }
+        return null;
+      };
+
+      MathApp.handleMouseUp = function (window_p) {
+        if (MathApp.is_mouse_dragging) {
+          let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+          if (this.Connect.ok) {
+            if (this.Connect.left) {
+              document.getElementById(
+                "foo"
+              ).innerHTML = `왼쪽으로 커넥트하며 closest_item은 ${this.closest_block_from_dragging.name}`;
+            } else {
+              document.getElementById(
+                "foo"
+              ).innerHTML = `오른쪽으로 커넥트하며 closest_item은 ${this.closest_block_from_dragging.name}`;
+            }
+          }
+
+          MathApp.is_mouse_dragging = false;
+          MathApp.mouse_drag_prev = { x: 0, y: 0 };
+
+          for (const block of this.blocks) {
+            block.visual_items[block.visual_items.length - 1].set({
+              stroke: "blue",
+            });
+          }
+          this.closest_block_from_dragging = null;
+          this.selected_block = null;
+
+          MathApp.canvas.requestRenderAll();
+        }
+      };
+
+      MathApp.transformToCanvasCoords = function (window_p) {
+        let rect = MathApp.canvas.getElement().getBoundingClientRect();
+        let canvas_p = {
+          x: window_p.x - rect.left,
+          y: window_p.y - rect.top,
+        };
+        return canvas_p;
+      };
+
+      MathApp.isInCanvas = function (window_p) {
+        let rect = MathApp.canvas.getElement().getBoundingClientRect();
+        if (
+          window_p.x >= rect.left &&
+          window_p.x < rect.left + rect.width &&
+          window_p.y >= rect.top &&
+          window_p.y < rect.top + rect.height
+        ) {
+          return true;
+        } else {
+          return false;
+        }
+      };
+
+      MathApp.findBlockOn = function (canvas_p) {
+        let x = canvas_p.x;
+        let y = canvas_p.y;
+
+        for (let i = 0; i < this.blocks.length; i++) {
+          let block = this.blocks[i];
+
+          if (
+            x >= block.position.x - block.size.width / 2 &&
+            x <= block.position.x + block.size.width / 2 &&
+            y >= block.position.y - block.size.height / 2 &&
+            y <= block.position.y + block.size.height / 2
+          ) {
+            return block;
+          }
+        }
+        return null;
+      };
+
+      //
+      MathApp.Block = function (position, size) {
+        this.position = position;
+        this.size = size;
+        this.type = MathApp.block_types.UNDEFINED;
+        this.id = Math.random().toString(36).substr(2, 16);
+
+        this.visual_items = [];
+
+        MathApp.blocks.push(this);
+      };
+
+      MathApp.Block.prototype.onDeselected = function () {
+        this.visual_items[this.visual_items.length - 1].set({
+          stroke: "rgba(0,0,255,1)",
+        });
+      };
+
+      MathApp.Block.prototype.onSelected = function () {
+        this.visual_items[this.visual_items.length - 1].set({
+          stroke: "rgba(255,0,0,1)",
+        });
+
+        this.visual_items.forEach((item) => {
+          MathApp.canvas.bringToFront(item);
+        });
+      };
+
+      MathApp.Block.prototype.moveTo = function (p) {
+        let tx = p.x - this.position.x;
+        let ty = p.y - this.position.y;
+
+        this.translate({ x: tx, y: ty });
+      };
+
+      MathApp.Block.prototype.translate = function (v) {
+        this.position.x += v.x;
+        this.position.y += v.y;
+
+        this.visual_items.forEach((item) => {
+          item.left += v.x;
+          item.top += v.y;
+        });
+      };
+
+      MathApp.Block.prototype.destroy = function () {
+        if (this == MathApp.selected_block) {
+          MathApp.selected_block = null;
+          this.onDeselected();
+        }
+
+        this.visual_items.forEach((item) => {
+          MathApp.canvas.remove(item);
+        });
+        this.visual_items = [];
+
+        let index = MathApp.blocks.indexOf(this);
+        if (index > -1) {
+          MathApp.blocks.splice(index, 1);
+        }
+      };
+
+      MathApp.Block_Chain = function (items) {
+        this.type = MathApp.block_types.BLOCK_CHAIN;
+        this.children = items;
+        this.size = { width: 0, height: 0 };
+
+        for (const child of this.children) {
+          this.size.width += child.size.width;
+          this.size.height += child.size.height;
+        }
+        MathApp.Block.call(this, MathApp.current_cursor_point, this.size);
+      };
+
+      MathApp.Block_Chain.prototype = Object.create(MathApp.Block.prototype);
+
+      //
+      MathApp.Symbol = function (position, size, name) {
+        MathApp.Block.call(this, position, size);
+        this.type = MathApp.block_types.SYMBOL;
+        this.name = name;
+
+        let block = this;
+
+        if (name in MathApp.symbol_paths) {
+          let path = `./resources/images/${MathApp.symbol_paths[name]}.jpg`;
+          fabric.Image.fromURL(path, function (img) {
+            // (0) Background
+            let background = new fabric.Rect({
+              left: position.x - size.width / 2,
+              top: position.y - size.height / 2,
+              width: size.width,
+              height: size.height,
+              fill: "rgba(255,255,255,1)",
+              stroke: "rgba(0,0,0,0)",
+              selectable: false,
+            });
+
+            // (1) Image
+            img.scaleToWidth(size.width);
+            img.scaleToHeight(size.height);
+
+            let img_w = img.getScaledWidth();
+            let img_h = img.getScaledHeight();
+
+            img.set({
+              left: position.x - img_w / 2,
+              top: position.y - img_h / 2,
+              selectable: false,
+            });
+
+            // (2) Boundary
+            let boundary = new fabric.Rect({
+              left: position.x - size.width / 2,
+              top: position.y - size.height / 2,
+              width: size.width,
+              height: size.height,
+              fill: "rgba(0,0,0,0)",
+              stroke: "rgba(0,0,255,1)",
+              strokeWidth: 5,
+              selectable: false,
+            });
+
+            //
+            MathApp.canvas.add(background);
+            MathApp.canvas.add(img);
+            MathApp.canvas.add(boundary);
+
+            //
+            block.visual_items.push(background);
+            block.visual_items.push(img);
+            block.visual_items.push(boundary);
+          });
+        }
+      };
+
+      MathApp.Symbol.prototype = Object.create(MathApp.Block.prototype);
+
+      //
+      $(document).ready(function () {
+        MathApp.initialize();
+        setInterval(() => {
+          MathApp.CalcDistancePassive();
+        }, 500);
+      });
+    </script>
+  </body>
+</html>
