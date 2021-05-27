@@ -69,11 +69,39 @@
       MathApp.current_cursor_point = {};
       MathApp.closest_block_from_dragging = null;
       MathApp.Connect = {};
+      MathApp.isMenuOn = false;
+
+      MathApp.blockMenu = null;
 
       MathApp.block_types = {
         UNDEFINED: "undefind",
         SYMBOL: "symbol",
         BLOCK_CHAIN: "block_chain",
+      };
+
+      MathApp.resetCanvas = function () {
+        if (MathApp.blocks.length > 0) {
+          MathApp.canvas.clear();
+          MathApp.canvas.set({
+            backgroundColor: "#eee",
+            hoverCursor: "default",
+            selection: false,
+          });
+
+          for (const block of this.blocks) {
+            if (block.visual_items && block.visual_items.length > 0) {
+              for (const item of block.visual_items) {
+                MathApp.canvas.add(item);
+              }
+            }
+          }
+
+          if (MathApp.blockMenu !== null && MathApp.isMenuOn) {
+            MathApp.blockMenu.visual_items.forEach((item) =>
+              MathApp.canvas.add(item)
+            );
+          }
+        }
       };
 
       MathApp.initialize = function () {
@@ -119,17 +147,108 @@
           let p = { x: event.pageX, y: event.pageY };
           MathApp.handleMouseMove(p);
         });
+        $(document).click(function (event) {
+          let p = { x: event.pageX, y: event.pageY };
+          MathApp.handleMouseClick(p);
+        });
         window.addEventListener(
           "contextmenu",
           (e) => {
             e.preventDefault();
+            let p = { x: e.pageX, y: e.pageY };
+            MathApp.handleRightClick(p);
           },
           false
         );
       };
 
+      MathApp.handleMouseClick = (window_p) => {
+        if (MathApp.isMenuOn && MathApp.blockMenu !== null) {
+          let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+          const menuMinX = MathApp.blockMenu.position.x;
+          const menuMinY = MathApp.blockMenu.position.y;
+          const menuMaxX =
+            MathApp.blockMenu.position.x + MathApp.blockMenu.size.width;
+          const menuMaxY =
+            MathApp.blockMenu.position.y + MathApp.blockMenu.size.height;
+
+          if (
+            canvas_p.x >= menuMinX &&
+            canvas_p.x <= menuMaxX &&
+            canvas_p.y >= menuMinY &&
+            canvas_p.y <= menuMaxY
+          ) {
+            //
+            const menu1 = {
+              start: MathApp.blockMenu.position.y,
+              end:
+                MathApp.blockMenu.position.y + MathApp.blockMenu.elementHeight,
+            };
+            const menu2 = {
+              start: menu1.end + 1,
+              end:
+                MathApp.blockMenu.position.y +
+                MathApp.blockMenu.elementHeight * 2,
+            };
+            const menu3 = {
+              start: menu2.end + 1,
+              end:
+                MathApp.blockMenu.position.y +
+                MathApp.blockMenu.elementHeight * 3,
+            };
+            const menu4 = {
+              start: menu3.end + 1,
+              end:
+                MathApp.blockMenu.position.y +
+                MathApp.blockMenu.elementHeight * 4,
+            };
+
+            if (canvas_p.y >= menu1.start && canvas_p.y <= menu1.end) {
+              console.log("menu1");
+              MathApp.blockMenu.execute();
+            } else if (canvas_p.y >= menu2.start && canvas_p.y <= menu2.end) {
+              console.log("menu2");
+              MathApp.blockMenu.decompose();
+            } else if (canvas_p.y >= menu3.start && canvas_p.y <= menu3.end) {
+              console.log("menu3");
+              MathApp.blockMenu.copy();
+            } else if (canvas_p.y >= menu4.start && canvas_p.y <= menu4.end) {
+              console.log("menu4");
+              MathApp.blockMenu.cleanUp();
+            }
+          } else {
+            console.log("You killed menu");
+            MathApp.isMenuOn = false;
+            MathApp.blockMenu.destroy();
+            MathApp.blockMenu = null;
+            MathApp.resetCanvas();
+          }
+        }
+      };
+
+      MathApp.handleRightClick = (window_p) => {
+        if (MathApp.isInCanvas(window_p)) {
+          let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+          if (MathApp.selected_block != null) {
+            MathApp.selected_block.onDeselected();
+            MathApp.selected_block = null;
+          }
+
+          let block = MathApp.findBlockOn(canvas_p);
+          if (block) {
+            MathApp.isMenuOn = true;
+            MathApp.blockMenu = new MathApp.BlockMenu(
+              MathApp.current_cursor_point,
+              block
+            );
+          }
+        }
+      };
+
       MathApp.handleKeyPress = function (key) {
-        if (key in this.symbol_paths) {
+        if (key in this.symbol_paths && MathApp.isMenuOn === false) {
           let size = {
             width: SYMBOL_WIDTH,
             height: SYMBOL_HEIGHT,
@@ -175,114 +294,123 @@
       };
 
       MathApp.handleMouseDown = function (window_p) {
-        if (MathApp.isInCanvas(window_p)) {
-          let canvas_p = MathApp.transformToCanvasCoords(window_p);
+        if (!MathApp.isMenuOn) {
+          if (MathApp.isInCanvas(window_p)) {
+            let canvas_p = MathApp.transformToCanvasCoords(window_p);
 
-          if (MathApp.selected_block != null) {
-            MathApp.selected_block.onDeselected();
-            MathApp.selected_block = null;
+            if (MathApp.selected_block != null) {
+              MathApp.selected_block.onDeselected();
+              MathApp.selected_block = null;
+            }
+
+            let block = MathApp.findBlockOn(canvas_p);
+            if (block != null) {
+              MathApp.selected_block = block;
+              MathApp.selected_block.onSelected();
+            }
+
+            MathApp.is_mouse_dragging = true;
+            MathApp.mouse_drag_prev = canvas_p;
+
+            MathApp.canvas.requestRenderAll();
+          } else {
+            MathApp.is_mouse_dragging = false;
+            MathApp.mouse_drag_prev = { x: 0, y: 0 };
           }
-
-          let block = MathApp.findBlockOn(canvas_p);
-          if (block != null) {
-            MathApp.selected_block = block;
-            MathApp.selected_block.onSelected();
-          }
-
-          MathApp.is_mouse_dragging = true;
-          MathApp.mouse_drag_prev = canvas_p;
-
-          MathApp.canvas.requestRenderAll();
-        } else {
-          MathApp.is_mouse_dragging = false;
-          MathApp.mouse_drag_prev = { x: 0, y: 0 };
         }
       };
 
       MathApp.CalcDistancePassive = function () {
-        const blocksPostion = MathApp.calcPositionsFromDragging();
+        MathApp.canvas.requestRenderAll();
+        if (!MathApp.isMenuOn) {
+          const blocksPostion = MathApp.calcPositionsFromDragging();
 
-        if (blocksPostion !== null) {
-          MathApp.Connect = {};
-          if (this.closest_block_from_dragging !== null) {
-            const block = this.blocks.find(
-              (block) => block.id === this.closest_block_from_dragging.id
-            );
-            if (block) {
-              block.visual_items[block.visual_items.length - 1].set({
-                stroke: "blue",
-              });
-              this.closest_block_from_dragging = null;
-            }
-          }
-          this.closest_block_from_dragging = blocksPostion[0];
-          for (const block of blocksPostion) {
-            if (this.closest_block_from_dragging.distance > block.distance) {
-              this.closest_block_from_dragging = block;
-            }
-          }
-
-          const closestBlock = MathApp.blocks.find(
-            (block) => block.id === this.closest_block_from_dragging.id
-          );
-
-          const closestBlockBoundary = {
-            minX: closestBlock.position.x - closestBlock.size.width / 2,
-            maxX: closestBlock.position.x + closestBlock.size.width / 2,
-            minY: closestBlock.position.y - closestBlock.size.height / 2,
-            maxY: closestBlock.position.y + closestBlock.size.height / 2,
-          };
-
-          const selectedBlockBoundary = {
-            leftX:
-              MathApp.selected_block.position.x -
-              MathApp.selected_block.size.width / 2,
-            rightX:
-              MathApp.selected_block.position.x +
-              MathApp.selected_block.size.width / 2,
-            minY:
-              MathApp.selected_block.position.y -
-              MathApp.selected_block.size.height / 2,
-            maxY:
-              MathApp.selected_block.position.y +
-              MathApp.selected_block.size.height / 2,
-          };
-
-          if (
-            (selectedBlockBoundary.leftX >= closestBlockBoundary.minX &&
-              selectedBlockBoundary.leftX <= closestBlockBoundary.maxX &&
-              ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
-                selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
-                (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
-                  selectedBlockBoundary.maxY <= closestBlockBoundary.maxY))) ||
-            (selectedBlockBoundary.rightX >= closestBlockBoundary.minX &&
-              selectedBlockBoundary.rightX <= closestBlockBoundary.maxX &&
-              ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
-                selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
-                (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
-                  selectedBlockBoundary.maxY <= closestBlockBoundary.maxY)))
-          ) {
-            //겹침 마우스를 떼기 전에 미리 겹쳐질 부위를 다른 색상으로 변경시켜야함
-            const percentage = MathApp.calcPercentageFromDragging(closestBlock);
-            if (percentage !== null) {
-              if (percentage.left > percentage.right) {
-                closestBlock.visual_items[
-                  closestBlock.visual_items.length - 1
-                ].set({
-                  stroke: "rgba(231, 76, 60,1.0)",
+          if (blocksPostion !== null) {
+            MathApp.Connect = {};
+            if (this.closest_block_from_dragging !== null) {
+              const block = this.blocks.find(
+                (block) => block.id === this.closest_block_from_dragging.id
+              );
+              if (block) {
+                block.visual_items[block.visual_items.length - 1].set({
+                  stroke: "blue",
                 });
-                MathApp.Connect = { ok: true, left: true, right: false };
-              } else {
-                closestBlock.visual_items[
-                  closestBlock.visual_items.length - 1
-                ].set({
-                  stroke: "rgba(52, 152, 219,1.0)",
-                });
-                MathApp.Connect = { ok: true, left: false, right: true };
+                this.closest_block_from_dragging = null;
               }
             }
-          } else {
-            MathApp.Connect = { ok: false, left: false, right: false };
+            this.closest_block_from_dragging = blocksPostion[0];
+            for (const block of blocksPostion) {
+              if (this.closest_block_from_dragging.distance > block.distance) {
+                this.closest_block_from_dragging = block;
+              }
+            }
+
+            if (this.closest_block_from_dragging !== null) {
+              const closestBlock = MathApp.blocks.find(
+                (block) => block.id === this.closest_block_from_dragging.id
+              );
+
+              const closestBlockBoundary = {
+                minX: closestBlock.position.x - closestBlock.size.width / 2,
+                maxX: closestBlock.position.x + closestBlock.size.width / 2,
+                minY: closestBlock.position.y - closestBlock.size.height / 2,
+                maxY: closestBlock.position.y + closestBlock.size.height / 2,
+              };
+
+              const selectedBlockBoundary = {
+                leftX:
+                  MathApp.selected_block.position.x -
+                  MathApp.selected_block.size.width / 2,
+                rightX:
+                  MathApp.selected_block.position.x +
+                  MathApp.selected_block.size.width / 2,
+                minY:
+                  MathApp.selected_block.position.y -
+                  MathApp.selected_block.size.height / 2,
+                maxY:
+                  MathApp.selected_block.position.y +
+                  MathApp.selected_block.size.height / 2,
+              };
+
+              if (
+                (selectedBlockBoundary.leftX >= closestBlockBoundary.minX &&
+                  selectedBlockBoundary.leftX <= closestBlockBoundary.maxX &&
+                  ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
+                    selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
+                    (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
+                      selectedBlockBoundary.maxY <=
+                        closestBlockBoundary.maxY))) ||
+                (selectedBlockBoundary.rightX >= closestBlockBoundary.minX &&
+                  selectedBlockBoundary.rightX <= closestBlockBoundary.maxX &&
+                  ((selectedBlockBoundary.minY >= closestBlockBoundary.minY &&
+                    selectedBlockBoundary.minY <= closestBlockBoundary.maxY) ||
+                    (selectedBlockBoundary.maxY >= closestBlockBoundary.minY &&
+                      selectedBlockBoundary.maxY <= closestBlockBoundary.maxY)))
+              ) {
+                //겹침 마우스를 떼기 전에 미리 겹쳐질 부위를 다른 색상으로 변경시켜야함
+                const percentage =
+                  MathApp.calcPercentageFromDragging(closestBlock);
+                if (percentage !== null) {
+                  if (percentage.left > percentage.right) {
+                    closestBlock.visual_items[
+                      closestBlock.visual_items.length - 1
+                    ].set({
+                      stroke: "rgba(231, 76, 60,1.0)",
+                    });
+                    MathApp.Connect = { ok: true, left: true, right: false };
+                  } else {
+                    closestBlock.visual_items[
+                      closestBlock.visual_items.length - 1
+                    ].set({
+                      stroke: "rgba(52, 152, 219,1.0)",
+                    });
+                    MathApp.Connect = { ok: true, left: false, right: true };
+                  }
+                }
+              } else {
+                MathApp.Connect = { ok: false, left: false, right: false };
+              }
+            }
           }
         }
       };
@@ -348,25 +476,27 @@
       };
 
       MathApp.handleMouseMove = function (window_p) {
-        let canvas_p = MathApp.transformToCanvasCoords(window_p);
+        if (!MathApp.isMenuOn) {
+          let canvas_p = MathApp.transformToCanvasCoords(window_p);
 
-        if (MathApp.is_mouse_dragging) {
-          if (MathApp.selected_block != null) {
-            let tx = canvas_p.x - MathApp.mouse_drag_prev.x;
-            let ty = canvas_p.y - MathApp.mouse_drag_prev.y;
-            MathApp.selected_block.translate({ x: tx, y: ty });
+          if (MathApp.is_mouse_dragging) {
+            if (MathApp.selected_block != null) {
+              let tx = canvas_p.x - MathApp.mouse_drag_prev.x;
+              let ty = canvas_p.y - MathApp.mouse_drag_prev.y;
+              MathApp.selected_block.translate({ x: tx, y: ty });
+            }
+            MathApp.mouse_drag_prev = canvas_p;
+
+            MathApp.canvas.requestRenderAll();
           }
-          MathApp.mouse_drag_prev = canvas_p;
-
-          MathApp.canvas.requestRenderAll();
+          MathApp.current_cursor_point = canvas_p;
         }
-        MathApp.current_cursor_point = canvas_p;
       };
 
       MathApp.calcPositionsFromDragging = function () {
-        if (MathApp.is_mouse_dragging) {
+        if (MathApp.is_mouse_dragging && !MathApp.isMenuOn) {
           if (MathApp.selected_block != null) {
-            if (this.blocks.length !== 0) {
+            if (this.blocks.length > 1) {
               const arr = [];
 
               const targetBlockPosition = MathApp.selected_block.position;
@@ -394,25 +524,45 @@
       };
 
       MathApp.handleMouseUp = function (window_p) {
-        if (MathApp.is_mouse_dragging) {
+        if (MathApp.is_mouse_dragging && !MathApp.isMenuOn) {
           let canvas_p = MathApp.transformToCanvasCoords(window_p);
 
-          if (this.Connect.ok) {
+          if (
+            this.Connect.ok &&
+            this.closest_block_from_dragging !== null &&
+            this.selected_block !== null
+          ) {
+            let closestBlock = MathApp.blocks.find(
+              (block) => block.id === this.closest_block_from_dragging.id
+            );
+
+            let newBlockChain;
             if (this.Connect.left) {
-              document.getElementById(
-                "foo"
-              ).innerHTML = `왼쪽으로 커넥트하며 closest_item은 ${this.closest_block_from_dragging.name}`;
+              newBlockChain = new MathApp.BlockChain(
+                this.selected_block,
+                closestBlock
+              );
             } else {
-              document.getElementById(
-                "foo"
-              ).innerHTML = `오른쪽으로 커넥트하며 closest_item은 ${this.closest_block_from_dragging.name}`;
+              newBlockChain = new MathApp.BlockChain(
+                closestBlock,
+                this.selected_block
+              );
             }
+            newBlockChain.setUpImgs();
+
+            this.selected_block.destroy();
+            closestBlock.destroy();
+            this.selected_block = null;
+            closestBlock = null;
           }
 
           MathApp.is_mouse_dragging = false;
           MathApp.mouse_drag_prev = { x: 0, y: 0 };
 
           for (const block of this.blocks) {
+            if (block.type === MathApp.block_types.BLOCK_CHAIN) {
+              continue;
+            }
             block.visual_items[block.visual_items.length - 1].set({
               stroke: "blue",
             });
@@ -466,6 +616,288 @@
         return null;
       };
 
+      MathApp.BlockMenu = function (position, target) {
+        this.position = position;
+        this.visual_items = [];
+        this.target = target;
+        this.size = {
+          width: 150,
+          height: 200,
+        };
+        this.nextPosition = 0;
+        this.elementHeight = this.size.height / 4;
+
+        const background = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y,
+          width: this.size.width,
+          height: this.size.height,
+          fill: "black",
+          stroke: "black",
+          selectable: false,
+        });
+
+        const menu1 = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "rgba(26, 188, 156,1.0)",
+          selectable: false,
+        });
+
+        const menu1Border = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "black",
+          strokeWidth: 5,
+          selectable: false,
+        });
+
+        const menu1Text = new fabric.Text("execute", {
+          left: menu1.left + 10,
+          top: menu1.top,
+          selectable: false,
+          stroke: "black",
+          fontSize: 30,
+          fill: "black",
+        });
+
+        this.nextPosition += this.elementHeight;
+
+        const menu2 = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "rgba(26, 188, 156,1.0)",
+          selectable: false,
+        });
+
+        const menu2Border = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "black",
+          strokeWidth: 5,
+          selectable: false,
+        });
+
+        const menu2Text = new fabric.Text("decompose", {
+          left: menu2.left + 10,
+          top: menu2.top,
+          selectable: false,
+          stroke: "black",
+          fontSize: 30,
+          fill: "black",
+        });
+
+        this.nextPosition += this.elementHeight;
+
+        const menu3 = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "rgba(26, 188, 156,1.0)",
+          selectable: false,
+        });
+
+        const menu3Border = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "black",
+          strokeWidth: 5,
+          selectable: false,
+        });
+
+        const menu3Text = new fabric.Text("copy", {
+          left: menu3.left + 10,
+          top: menu3.top,
+          selectable: false,
+          stroke: "black",
+          fontSize: 30,
+          fill: "black",
+        });
+
+        this.nextPosition += this.elementHeight;
+
+        const menu4 = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "rgba(26, 188, 156,1.0)",
+          selectable: false,
+        });
+
+        const menu4Border = new fabric.Rect({
+          left: this.position.x,
+          top: this.position.y + this.nextPosition,
+          width: this.size.width,
+          height: this.elementHeight,
+          fill: "rgba(26, 188, 156,1.0)",
+          stroke: "black",
+          strokeWidth: 5,
+          selectable: false,
+        });
+
+        const menu4Text = new fabric.Text("clean up", {
+          left: menu4.left + 10,
+          top: menu4.top,
+          selectable: false,
+          stroke: "black",
+          fontSize: 30,
+          fill: "black",
+        });
+
+        MathApp.canvas.add(background);
+        MathApp.canvas.add(menu1);
+        MathApp.canvas.add(menu1Border);
+        MathApp.canvas.add(menu1Text);
+        MathApp.canvas.add(menu2);
+        MathApp.canvas.add(menu2Border);
+        MathApp.canvas.add(menu2Text);
+        MathApp.canvas.add(menu3);
+        MathApp.canvas.add(menu3Border);
+        MathApp.canvas.add(menu3Text);
+        MathApp.canvas.add(menu4);
+        MathApp.canvas.add(menu4Border);
+        MathApp.canvas.add(menu4Text);
+
+        this.visual_items.push(background);
+        this.visual_items.push(menu1);
+        this.visual_items.push(menu1Border);
+        this.visual_items.push(menu1Text);
+        this.visual_items.push(menu2);
+        this.visual_items.push(menu2Border);
+        this.visual_items.push(menu2Text);
+        this.visual_items.push(menu3);
+        this.visual_items.push(menu3Border);
+        this.visual_items.push(menu3Text);
+        this.visual_items.push(menu4);
+        this.visual_items.push(menu4Border);
+        this.visual_items.push(menu4Text);
+      };
+
+      MathApp.BlockMenu.prototype.execute = function () {
+        if (this.target && this.target.blocks.length > 0) {
+          let value = "";
+          for (const block of this.target.blocks) {
+            value += block;
+          }
+
+          let result;
+          try {
+            result = parser.eval(value).toString();
+            const tokens = result.split(" ");
+            if (tokens[0] == "function") {
+              result = tokens[0];
+            }
+          } catch (e) {
+            result = e;
+          }
+
+          if (result.length > 1) {
+            const newBlockChain = new MathApp.ExeBlockChain(result.split(""), {
+              x: 100,
+              y: 100,
+            });
+
+            newBlockChain.setUpImgs();
+          } else {
+            new MathApp.Symbol(
+              MathApp.current_cursor_point,
+              { width: SYMBOL_WIDTH, height: SYMBOL_HEIGHT },
+              result
+            );
+          }
+
+          MathApp.blockMenu.destroy();
+          MathApp.blockMenu = null;
+          MathApp.isMenuOn = false;
+        }
+      };
+      MathApp.BlockMenu.prototype.copy = function () {
+        if (MathApp.blockMenu && MathApp.blockMenu.target) {
+          const target = MathApp.blockMenu.target;
+
+          const newBlockPosition = {
+            x: target.position.x,
+            y: target.position.y + 20,
+          };
+
+          switch (target.type) {
+            case MathApp.block_types.SYMBOL:
+              new MathApp.Symbol(newBlockPosition, target.size, target.name);
+              break;
+            case MathApp.block_types.BLOCK_CHAIN:
+              const newBlockChain = new MathApp.ExeBlockChain(
+                target.blocks,
+                newBlockPosition
+              );
+              newBlockChain.setUpImgs();
+              break;
+          }
+
+          MathApp.blockMenu.destroy();
+          MathApp.blockMenu = null;
+          MathApp.isMenuOn = false;
+        }
+      };
+      MathApp.BlockMenu.prototype.decompose = function () {
+        if (MathApp.blockMenu && MathApp.blockMenu.target) {
+          const target = MathApp.blockMenu.target;
+
+          if (target.type === MathApp.block_types.BLOCK_CHAIN) {
+            for (let i = 0; i < target.blocks.length; i++) {
+              const block = target.blocks[i];
+              const blockPosition = {
+                x: target.visual_items[i * 3].left,
+                y: target.visual_items[i * 3].top,
+              };
+              const blockSize = { width: SYMBOL_WIDTH, height: SYMBOL_HEIGHT };
+
+              new MathApp.Symbol(blockPosition, blockSize, block);
+            }
+
+            target.destroy();
+          }
+          MathApp.blockMenu.destroy();
+          MathApp.blockMenu = null;
+          MathApp.isMenuOn = false;
+        }
+      };
+      MathApp.BlockMenu.prototype.cleanUp = function () {
+        if (MathApp.blockMenu && MathApp.blockMenu.target) {
+          const target = MathApp.blockMenu.target;
+
+          target.destroy();
+          MathApp.blockMenu.destroy();
+          MathApp.blockMenu = null;
+          MathApp.isMenuOn = false;
+        }
+      };
+
+      MathApp.BlockMenu.prototype.destroy = function () {
+        this.visual_items.forEach((item) => {
+          MathApp.canvas.remove(item);
+        });
+        this.visual_items = [];
+      };
+
       //
       MathApp.Block = function (position, size) {
         this.position = position;
@@ -485,9 +917,16 @@
       };
 
       MathApp.Block.prototype.onSelected = function () {
-        this.visual_items[this.visual_items.length - 1].set({
-          stroke: "rgba(255,0,0,1)",
-        });
+        switch (this.type) {
+          case MathApp.block_types.SYMBOL:
+            this.visual_items[this.visual_items.length - 1].set({
+              stroke: "rgba(255,0,0,1)",
+            });
+            break;
+          case MathApp.block_types.BLOCK_CHAIN:
+            // for (let i = 0; i < this.visual_items.length; i++) {}
+            break;
+        }
 
         this.visual_items.forEach((item) => {
           MathApp.canvas.bringToFront(item);
@@ -528,19 +967,231 @@
         }
       };
 
-      MathApp.Block_Chain = function (items) {
-        this.type = MathApp.block_types.BLOCK_CHAIN;
-        this.children = items;
-        this.size = { width: 0, height: 0 };
+      MathApp.ExeBlockChain = function (items, position) {
+        this.position = position;
+        this.blocks = [...items];
+        this.size = {
+          width: SYMBOL_WIDTH * this.blocks.length,
+          height: SYMBOL_HEIGHT,
+        };
 
-        for (const child of this.children) {
-          this.size.width += child.size.width;
-          this.size.height += child.size.height;
-        }
-        MathApp.Block.call(this, MathApp.current_cursor_point, this.size);
+        MathApp.Block.call(this, this.position, this.size);
+
+        this.type = MathApp.block_types.BLOCK_CHAIN;
+
+        this.nextPosition = 0;
+        this.count = 0;
+        this.loading = false;
       };
 
-      MathApp.Block_Chain.prototype = Object.create(MathApp.Block.prototype);
+      MathApp.ExeBlockChain.prototype = Object.create(MathApp.Block.prototype);
+
+      MathApp.ExeBlockChain.prototype.setUpImg = async function (imgSrc) {
+        if (imgSrc in MathApp.symbol_paths) {
+          const path = `./resources/images/${MathApp.symbol_paths[imgSrc]}.jpg`;
+          const blockChain = this;
+
+          return new Promise((resolve) => {
+            fabric.Image.fromURL(path, (img) => {
+              const position = { ...blockChain.position };
+
+              // (0) Background
+              let background = new fabric.Rect({
+                left: position.x + blockChain.nextPosition - SYMBOL_WIDTH / 2,
+                top: position.y - SYMBOL_HEIGHT / 2,
+                width: SYMBOL_WIDTH,
+                height: SYMBOL_HEIGHT,
+                fill: "rgba(255,255,255,1)",
+                stroke: "rgba(0,0,0,0)",
+                selectable: false,
+              });
+
+              // (1) Image
+              img.scaleToWidth(SYMBOL_WIDTH);
+              img.scaleToHeight(SYMBOL_HEIGHT);
+
+              let img_w = img.getScaledWidth();
+              let img_h = img.getScaledHeight();
+
+              img.set({
+                left: position.x + blockChain.nextPosition - img_w / 2,
+                top: position.y - img_h / 2,
+                selectable: false,
+              });
+
+              // (2) Boundary
+              let boundary = new fabric.Rect({
+                left: position.x + blockChain.nextPosition - SYMBOL_WIDTH / 2,
+                top: position.y - SYMBOL_HEIGHT / 2,
+                width: SYMBOL_WIDTH,
+                height: SYMBOL_HEIGHT,
+                fill: "rgba(0,0,0,0)",
+                stroke: "rgba(0,0,255,1)",
+                strokeWidth: 5,
+                selectable: false,
+              });
+
+              //
+              MathApp.canvas.add(background);
+              MathApp.canvas.add(img);
+              MathApp.canvas.add(boundary);
+
+              blockChain.visual_items.push(background);
+              blockChain.visual_items.push(img);
+              blockChain.visual_items.push(boundary);
+              //
+
+              blockChain.nextPosition += SYMBOL_WIDTH;
+              blockChain.count++;
+
+              if (blockChain.count >= blockChain.blocks.length) {
+                blockChain.position.x =
+                  (blockChain.position.x -
+                    SYMBOL_WIDTH / 2 +
+                    (blockChain.position.x + blockChain.size.width)) /
+                  2;
+              }
+              resolve();
+            });
+          });
+        }
+      };
+
+      MathApp.ExeBlockChain.prototype.setUpImgs = async function () {
+        if (this.blocks.length > 0) {
+          for (const block of this.blocks) {
+            await this.setUpImg(block);
+          }
+        }
+      };
+
+      MathApp.BlockChain = function (item1, item2) {
+        this.position = item1.position;
+        this.blocks = [];
+        this.size = { width: 0, height: 0 };
+
+        switch (item1.type) {
+          case MathApp.block_types.SYMBOL:
+            this.size = {
+              width: this.size.width + SYMBOL_WIDTH,
+              height: SYMBOL_HEIGHT,
+            };
+            this.blocks.push(item1.name);
+            break;
+          case MathApp.block_types.BLOCK_CHAIN:
+            this.size = {
+              width: this.size.width + item1.size.width,
+              height: SYMBOL_HEIGHT,
+            };
+            this.blocks = [...item1.blocks, ...this.blocks];
+            break;
+        }
+
+        switch (item2.type) {
+          case MathApp.block_types.SYMBOL:
+            this.size = {
+              width: this.size.width + SYMBOL_WIDTH,
+              height: SYMBOL_HEIGHT,
+            };
+            this.blocks.push(item2.name);
+            break;
+          case MathApp.block_types.BLOCK_CHAIN:
+            this.size = {
+              width: this.size.width + item2.size.width,
+              height: SYMBOL_HEIGHT,
+            };
+            this.blocks = [...this.blocks, ...item2.blocks];
+            break;
+        }
+
+        MathApp.Block.call(this, this.position, this.size);
+
+        this.type = MathApp.block_types.BLOCK_CHAIN;
+
+        this.nextPosition = 0;
+        this.count = 0;
+      };
+
+      MathApp.BlockChain.prototype = Object.create(MathApp.Block.prototype);
+
+      MathApp.BlockChain.prototype.setUpImg = async function (imgSrc) {
+        if (imgSrc in MathApp.symbol_paths) {
+          const path = `./resources/images/${MathApp.symbol_paths[imgSrc]}.jpg`;
+          const blockChain = this;
+
+          return new Promise((resolve) => {
+            fabric.Image.fromURL(path, (img) => {
+              const position = { ...blockChain.position };
+
+              // (0) Background
+              let background = new fabric.Rect({
+                left: position.x + blockChain.nextPosition - SYMBOL_WIDTH / 2,
+                top: position.y - SYMBOL_HEIGHT / 2,
+                width: SYMBOL_WIDTH,
+                height: SYMBOL_HEIGHT,
+                fill: "rgba(255,255,255,1)",
+                stroke: "rgba(0,0,0,0)",
+                selectable: false,
+              });
+
+              // (1) Image
+              img.scaleToWidth(SYMBOL_WIDTH);
+              img.scaleToHeight(SYMBOL_HEIGHT);
+
+              let img_w = img.getScaledWidth();
+              let img_h = img.getScaledHeight();
+
+              img.set({
+                left: position.x + blockChain.nextPosition - img_w / 2,
+                top: position.y - img_h / 2,
+                selectable: false,
+              });
+
+              // (2) Boundary
+              let boundary = new fabric.Rect({
+                left: position.x + blockChain.nextPosition - SYMBOL_WIDTH / 2,
+                top: position.y - SYMBOL_HEIGHT / 2,
+                width: SYMBOL_WIDTH,
+                height: SYMBOL_HEIGHT,
+                fill: "rgba(0,0,0,0)",
+                stroke: "rgba(0,0,255,1)",
+                strokeWidth: 5,
+                selectable: false,
+              });
+
+              //
+              MathApp.canvas.add(background);
+              MathApp.canvas.add(img);
+              MathApp.canvas.add(boundary);
+
+              blockChain.visual_items.push(background);
+              blockChain.visual_items.push(img);
+              blockChain.visual_items.push(boundary);
+              //
+
+              blockChain.nextPosition += SYMBOL_WIDTH;
+              blockChain.count++;
+
+              if (blockChain.count >= blockChain.blocks.length) {
+                blockChain.position.x =
+                  (blockChain.position.x -
+                    SYMBOL_WIDTH / 2 +
+                    (blockChain.position.x + blockChain.size.width)) /
+                  2;
+              }
+              resolve();
+            });
+          });
+        }
+      };
+
+      MathApp.BlockChain.prototype.setUpImgs = async function () {
+        if (this.blocks.length > 0) {
+          for (const block of this.blocks) {
+            await this.setUpImg(block);
+          }
+        }
+      };
 
       //
       MathApp.Symbol = function (position, size, name) {
@@ -609,6 +1260,12 @@
         MathApp.initialize();
         setInterval(() => {
           MathApp.CalcDistancePassive();
+          MathApp.resetCanvas();
+          console.log(
+            MathApp.blocks,
+            MathApp.closest_block_from_dragging,
+            MathApp.selected_block
+          );
         }, 500);
       });
     </script>
